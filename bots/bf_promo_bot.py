@@ -298,7 +298,8 @@ def reply_with_stats(bot_client: Client, parent_uri: str, parent_cid: str) -> No
 
     print(f"💬 Reply met stats plaatsen onder: {parent_uri}")
     try:
-        bot_client.post(
+        # gebruik high-level helper send_post met reply_to
+        bot_client.send_post(
             text=text,
             reply_to={
                 "uri": parent_uri,
@@ -310,7 +311,7 @@ def reply_with_stats(bot_client: Client, parent_uri: str, parent_cid: str) -> No
         print(f"⚠️ Fout bij plaatsen stats-reply: {e}")
 
 
-def quote_post(quote_client: Optional[Client], target_uri: str) -> None:
+def quote_post(quote_client: Optional[Client], target_uri: str, target_cid: str) -> None:
     """
     Maakt een citaatpost op het quote-account (@hotbleusky)
     met vaste titel, link, hashtags en tagline.
@@ -336,6 +337,7 @@ def quote_post(quote_client: Optional[Client], target_uri: str) -> None:
                 "$type": "app.bsky.embed.record",
                 "record": {
                     "uri": target_uri,
+                    "cid": target_cid,
                 },
             },
         )
@@ -362,142 +364,4 @@ def main():
         return
 
     # 2) Login: quote-account (@hotbleusky)
-    quote_client: Optional[Client] = None
-    try:
-        quote_client = login_client("QUOTE_BSKY_USERNAME", "QUOTE_BSKY_PASSWORD")
-    except RuntimeError:
-        print("ℹ️ Quote-account niet geactiveerd (QUOTE_BSKY_* secrets ontbreken).")
-
-    # 3) (optioneel) 2e repost-account – nu nog niet actief
-    repost2_client: Optional[Client] = None
-    try:
-        repost2_client = login_client("REPOST2_BSKY_USERNAME", "REPOST2_BSKY_PASSWORD")
-        print("ℹ️ 2e repost-account is ingelogd, maar logica is nog niet actief in deze versie.")
-    except RuntimeError:
-        print("ℹ️ 2e repost-account niet geactiveerd (REPOST2_BSKY_* secrets ontbreken).")
-
-    # 4) Repost-log laden (cooldown 14 dagen)
-    repost_log = load_repost_log()
-    print(f"🧠 Repost-log geladen (entries na cleanup): {len(repost_log)}")
-
-    # 5) Feed ophalen
-    posts = get_feed_posts(bot_client)
-    if not posts:
-        print("ℹ️ Geen posts in feed – stoppen.")
-        return
-
-    # sorteer op oud -> nieuw (indexedAt of createdAt)
-    def _get_ts(p):
-        post = p.post
-        ts = getattr(post, "indexedAt", None)
-        if ts is None:
-            record = getattr(post, "record", None)
-            ts = getattr(record, "createdAt", "")
-        return ts
-
-    posts.sort(key=_get_ts)
-
-    me = bot_client.me
-
-    # -----------------------------------
-    # SELECTIE VAN POSTS VOOR DEZE RUN
-    # -----------------------------------
-
-    # nieuwste post in de feed
-    newest_item = posts[-1]
-    newest_uri = newest_item.post.uri
-
-    # alle oudere posts
-    older_items = posts[:-1]
-
-    # filter: alleen repost-kandidaten die niet van jezelf zijn en niet in cooldown
-    old_candidates = []
-    for item in older_items:
-        uri = item.post.uri
-        author = item.post.author
-        if author.did == me.did:
-            continue
-        if not can_repost(uri, repost_log):
-            continue
-        old_candidates.append(item)
-
-    # nieuwste post kandidaat?
-    newest_candidate = None
-    newest_author = newest_item.post.author
-    if newest_author.did != me.did and can_repost(newest_uri, repost_log):
-        newest_candidate = newest_item
-
-    print(f"📊 Oude kandidaten (na cooldown): {len(old_candidates)}")
-    print(f"📊 Nieuwste post {'kan' if newest_candidate else 'kan NIET'} gerepost worden (cooldown-check).")
-
-    # kies max 2 willekeurige oude posts
-    chosen_old: List = []
-    if old_candidates:
-        chosen_old = random.sample(old_candidates, min(2, len(old_candidates)))
-
-    selected_items: List = []
-    selected_items.extend(chosen_old)
-    if newest_candidate is not None:
-        selected_items.append(newest_candidate)
-
-    if not selected_items:
-        print("ℹ️ Geen geschikte posts om te repost-en deze run (cooldown).")
-        return
-
-    print(f"✅ Totaal geselecteerde posts deze run: {len(selected_items)}")
-
-    # -----------------------------------
-    # UITVOERING VOOR ELKE GEKOZEN POST
-    # -----------------------------------
-
-    total_followed = 0
-    index = 0
-
-    for item in selected_items:
-        index += 1
-        post = item.post
-        uri = post.uri
-        cid = post.cid
-        author = post.author
-
-        reason = "nieuwste post" if item is newest_candidate else "random oude"
-
-        print("----------------------------------------")
-        print(f"▶️ [{index}/{len(selected_items)}] Verwerken: {reason}")
-        print(f"   Post URI: {uri}")
-        print(f"   Auteur: {author.handle}")
-
-        # 1) Auteur volgen
-        ensure_follow(bot_client, author.did, author.handle)
-
-        # 2) Repost op hoofdaccount
-        print("=== [2/6] Repost hoofdaccount ===")
-        if not repost_post(bot_client, uri, cid, reason=reason):
-            # als repost faalt, sla de rest van de stappen over voor deze post
-            continue
-
-        # 3) Like op hoofdaccount
-        print("=== [3/6] Like hoofdaccount ===")
-        like_post(bot_client, uri, cid)
-
-        # 4) Likers volgen
-        followed_now = follow_likers(bot_client, uri)
-        total_followed += followed_now
-
-        # 5) Stats-reply
-        reply_with_stats(bot_client, uri, cid)
-
-        # 6) Citaatpost op quote-account (@hotbleusky)
-        quote_post(quote_client, uri)
-
-        # 7) Markeer in cooldown-log
-        mark_reposted(uri, repost_log)
-
-    print("========================================")
-    print(f"📈 Totaal nieuwe mensen gevolgd deze run: {total_followed}")
-    print("✅ BF Promo Bot run afgerond.")
-    print("========================================")
-
-
-if __name__ == "__main__":
-    main()
+    quote_client: Optional[Client] = None   0
