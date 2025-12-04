@@ -1,3 +1,4 @@
+
 import os
 import json
 import random
@@ -19,7 +20,7 @@ FEED_URI = "at://did:plc:jaka644beit3x4vmmg6yysw7/app.bsky.feed.generator/aaaolr
 REPOST_LOG_FILE = "bf_promo_repost_log.json"
 COOLDOWN_DAYS = 14  # 2 weken
 
-# Account waarvan we followers willen tonen in de stats-reply
+# Account waarmee je samenwerkt / waarvan je stats wilt tonen
 STATS_ACCOUNT_HANDLE = "nakedneighbour1985.bsky.social"
 
 # (optioneel) 2e repost-account state file (nog niet actief gebruikt)
@@ -177,6 +178,7 @@ def repost_post(client: Client, uri: str, cid: str, reason: str = "") -> bool:
             print(f"🔁 Reposting ({reason}).")
         else:
             print("🔁 Reposting.")
+        # LET OP: echte repost, GEEN tekst
         client.repost(uri, cid)
         print("✔️ Repost gelukt.")
         return True
@@ -357,12 +359,12 @@ def quote_post(quote_client: Optional[Client], target_uri: str, target_cid: str)
 
     print("=== [6/x] Citaatpost op quote-account ===")
 
+    # Bouw een compacte tekst, bewust kort
     base_text = (
-        f"{TITLE}\n\n"
-        f"{LINK}\n\n"
-        + " ".join(HASHTAGS)
-        + "\n\n"
-        + TAGLINE
+        f"{TITLE}\n"
+        f"{LINK}\n"
+        + " ".join(HASHTAGS[:15])  # max 15 hashtags
+        + f"\n{TAGLINE}"
     )
 
     # Bluesky limiet ~300 graphemes → veiligheidsmarge
@@ -467,8 +469,27 @@ def main():
         print("ℹ️ Geen posts in feed – stoppen.")
         return
 
+    # 6) DID van samenwerking-account ophalen
+    target_did: Optional[str] = None
+    try:
+        profile = bot_client.app.bsky.actor.get_profile({"actor": STATS_ACCOUNT_HANDLE})
+        target_did = profile.did
+        print("🎯 Samenwerkingsaccount gevonden.")
+    except Exception as e:
+        print(f"⚠️ Kon samenwerkingsaccount niet specifiek ophalen, gebruik volledige feed: {e}")
+
+    # 7) Filter posts op samenwerkingsaccount (als bekend)
+    working_posts = posts
+    if target_did:
+        filtered = [p for p in posts if getattr(p.post.author, "did", None) == target_did]
+        if filtered:
+            working_posts = filtered
+            print(f"🎯 Aantal posts van samenwerkingsaccount in feed: {len(working_posts)}")
+        else:
+            print("ℹ️ Geen posts van samenwerkingsaccount in feed – gebruik volledige feed.")
+
     # sorteer op oud -> nieuw (op basis van createdAt)
-    posts.sort(key=get_post_timestamp)
+    working_posts.sort(key=get_post_timestamp)
 
     me = bot_client.me
 
@@ -476,12 +497,12 @@ def main():
     # SELECTIE VAN POSTS VOOR DEZE RUN
     # -----------------------------------
 
-    # nieuwste post in de feed (op basis van createdAt)
-    newest_item = posts[-1]
+    # nieuwste post in de (gefilterde) set
+    newest_item = working_posts[-1]
     newest_uri = newest_item.post.uri
 
-    # alle oudere posts
-    older_items = posts[:-1]
+    # alle oudere posts uit dezelfde set
+    older_items = working_posts[:-1]
 
     # filter: alleen repost-kandidaten die niet van jezelf zijn en niet in cooldown (voor OUDE posts)
     old_candidates = []
@@ -549,7 +570,7 @@ def main():
         # 2) Als dit de nieuwste is: oude repost (indien aanwezig) eerst verwijderen
         unrepost_if_needed(bot_client, post, is_newest=is_newest)
 
-        # 3) Repost op hoofdaccount
+        # 3) Repost op hoofdaccount (ZONDER tekst)
         print("=== [2/6] Repost hoofdaccount ===")
         if not repost_post(bot_client, uri, cid, reason=reason):
             # als repost faalt, sla de rest van de stappen over voor deze post
