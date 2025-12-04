@@ -115,8 +115,8 @@ def login_client(username_env: str, password_env: str) -> Client:
 
 def get_feed_posts(client: Client):
     """
-    Haalt de feed op en filtert op echte posts (geen reposts/quotes).
-    Retourneert een lijst van feed items (FeedViewPost).
+    Haalt de feed op en retourneert alle items met een 'post'.
+    Geen strenge type-filter meer, zodat generator-feeds ook werken.
     """
     print("=== [1/6] Feed ophalen ===")
     resp = client.app.bsky.feed.get_feed({"feed": FEED_URI, "limit": 50})
@@ -124,11 +124,10 @@ def get_feed_posts(client: Client):
 
     posts = []
     for item in items:
-        post = item.post
-        record = getattr(post, "record", None)
-        rtype = getattr(record, "$type", "")
-        if rtype == "app.bsky.feed.post":
-            posts.append(item)
+        post = getattr(item, "post", None)
+        if post is None:
+            continue
+        posts.append(item)
 
     print(f"📂 Aantal posts in feed (na filter): {len(posts)}")
     return posts
@@ -299,7 +298,6 @@ def reply_with_stats(bot_client: Client, parent_uri: str, parent_cid: str) -> No
 
     print(f"💬 Reply met stats plaatsen onder: {parent_uri}")
     try:
-        # atproto Client heeft meestal send_post; post werkt in nieuwe versies
         bot_client.post(
             text=text,
             reply_to={
@@ -312,7 +310,7 @@ def reply_with_stats(bot_client: Client, parent_uri: str, parent_cid: str) -> No
         print(f"⚠️ Fout bij plaatsen stats-reply: {e}")
 
 
-def quote_post(quote_client: Client, target_uri: str) -> None:
+def quote_post(quote_client: Optional[Client], target_uri: str) -> None:
     """
     Maakt een citaatpost op het quote-account (@hotbleusky)
     met vaste titel, link, hashtags en tagline.
@@ -388,8 +386,16 @@ def main():
         print("ℹ️ Geen posts in feed – stoppen.")
         return
 
-    # sorteer op oud -> nieuw
-    posts.sort(key=lambda p: p.post.record.createdAt)
+    # sorteer op oud -> nieuw (indexedAt of createdAt)
+    def _get_ts(p):
+        post = p.post
+        ts = getattr(post, "indexedAt", None)
+        if ts is None:
+            record = getattr(post, "record", None)
+            ts = getattr(record, "createdAt", "")
+        return ts
+
+    posts.sort(key=_get_ts)
 
     me = bot_client.me
 
