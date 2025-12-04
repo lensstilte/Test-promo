@@ -1,4 +1,3 @@
-
 import os
 import json
 import random
@@ -12,19 +11,15 @@ from atproto import Client
 # INSTELLINGEN
 # -----------------------------------
 
-# BF promo feed
-FEED_NAME = "BF promo"
-FEED_URI = "at://did:plc:jaka644beit3x4vmmg6yysw7/app.bsky.feed.generator/aaaolr5sgy35a"
+# Doel-account (samenwerking): hier halen we ALLE posts vandaan
+TARGET_HANDLE = "nakedneighbour1985.bsky.social"
 
 # Logbestand voor repost cooldown (geldt alleen voor oude posts)
 REPOST_LOG_FILE = "bf_promo_repost_log.json"
 COOLDOWN_DAYS = 14  # 2 weken
 
-# Account waarmee je samenwerkt / waarvan je stats wilt tonen
-STATS_ACCOUNT_HANDLE = "nakedneighbour1985.bsky.social"
-
-# (optioneel) 2e repost-account state file (nog niet actief gebruikt)
-REPOST2_STATE_FILE = "repost2_last_reposts.json"
+# Account waarvan we followers willen tonen in de stats-reply
+STATS_ACCOUNT_HANDLE = TARGET_HANDLE
 
 # Quote-account tekst instellingen (voor @hotbleusky)
 TITLE = "🔥𝐧𝐚𝐤𝐞𝐝𝐧𝐞𝐢𝐠𝐡𝐛𝐨𝐮𝐫𝟏𝟗𝟖5🔥"
@@ -111,16 +106,28 @@ def login_client(username_env: str, password_env: str) -> Client:
 
 
 # -----------------------------------
-# HULPFUNCTIES: FEED & POSTS
+# HULPFUNCTIES: POSTS
 # -----------------------------------
 
-def get_feed_posts(client: Client):
+def get_post_timestamp(feed_item) -> str:
     """
-    Haalt de feed op en retourneert alle items met een 'post'.
-    Geen strenge type-filter, zodat generator-feeds ook werken.
+    Haalt createdAt van de originele post, voor sortering (oud -> nieuw).
     """
-    print("=== [1/6] Feed ophalen ===")
-    resp = client.app.bsky.feed.get_feed({"feed": FEED_URI, "limit": 50})
+    post = feed_item.post
+    record = getattr(post, "record", None)
+    ts = getattr(record, "createdAt", "")
+    return ts or ""
+
+
+def get_author_posts(client: Client, target_did: str, limit: int = 50):
+    """
+    Haalt de author-feed op van het samenwerkingsaccount.
+    Dit is de enige bron voor oude + nieuwste posts.
+    """
+    print("=== [1/6] Auteur-feed ophalen ===")
+    resp = client.app.bsky.feed.get_author_feed(
+        {"actor": target_did, "limit": limit}
+    )
     items = resp.feed
 
     posts = []
@@ -130,22 +137,12 @@ def get_feed_posts(client: Client):
             continue
         posts.append(item)
 
-    print(f"📂 Aantal posts in feed (na filter): {len(posts)}")
+    print(f"📂 Aantal posts in auteur-feed: {len(posts)}")
     return posts
 
 
-def get_post_timestamp(item) -> str:
-    """
-    Haal timestamp string voor sortering (oud -> nieuw), op basis van post-datum.
-    We gebruiken hier alleen record.createdAt van de originele post.
-    """
-    record = getattr(item.post, "record", None)
-    ts = getattr(record, "createdAt", "")
-    return ts or ""
-
-
 # -----------------------------------
-# HULPFUNCTIES: SOCIAL ACTIONS (FOLLOW / LIKE / REPOST / QUOTE)
+# HULPFUNCTIES: SOCIAL ACTIONS
 # -----------------------------------
 
 def ensure_follow(client: Client, actor_did: str) -> None:
@@ -178,7 +175,7 @@ def repost_post(client: Client, uri: str, cid: str, reason: str = "") -> bool:
             print(f"🔁 Reposting ({reason}).")
         else:
             print("🔁 Reposting.")
-        # LET OP: echte repost, GEEN tekst
+        # Puur repost, GEEN tekst
         client.repost(uri, cid)
         print("✔️ Repost gelukt.")
         return True
@@ -359,12 +356,12 @@ def quote_post(quote_client: Optional[Client], target_uri: str, target_cid: str)
 
     print("=== [6/x] Citaatpost op quote-account ===")
 
-    # Bouw een compacte tekst, bewust kort
+    # Compacte, "normale" tekst zodat clients hashtags/links kunnen aanklikken
     base_text = (
-        f"{TITLE}\n"
-        f"{LINK}\n"
-        + " ".join(HASHTAGS[:15])  # max 15 hashtags
-        + f"\n{TAGLINE}"
+        f"{TITLE}\n\n"
+        f"Link 🔗 {LINK}\n\n"
+        + " ".join(HASHTAGS)
+        + f"\n\n{TAGLINE}"
     )
 
     # Bluesky limiet ~300 graphemes → veiligheidsmarge
@@ -431,8 +428,8 @@ def unrepost_if_needed(client: Client, post_obj, is_newest: bool) -> None:
 
 def main():
     print("========================================")
-    print(f"🚀 BF Promo Bot start – feed: {FEED_NAME}")
-    print(f"📎 Feed URI: {FEED_URI}")
+    print("🚀 BF Promo Bot start – op basis van account-feed")
+    print(f"🎯 Doel-account: {TARGET_HANDLE}")
     print("========================================")
 
     # 1) Login: hoofdaccount (@beautyfan)
@@ -451,45 +448,27 @@ def main():
     except RuntimeError:
         print("ℹ️ Quote-account niet geactiveerd (QUOTE_BSKY_* secrets ontbreken).")
 
-    # 3) (optioneel) 2e repost-account – nog niet actief in logica
-    repost2_client: Optional[Client] = None
+    # 3) DID van doel-account ophalen
     try:
-        repost2_client = login_client("REPOST2_BSKY_USERNAME", "REPOST2_BSKY_PASSWORD")
-        print("ℹ️ 2e repost-account is ingelogd, maar logica is nog niet actief in deze versie.")
-    except RuntimeError:
-        print("ℹ️ 2e repost-account niet geactiveerd (REPOST2_BSKY_* secrets ontbreken).")
+        profile = bot_client.app.bsky.actor.get_profile({"actor": TARGET_HANDLE})
+        target_did = profile.did
+        print("🎯 Doel-account profiel opgehaald.")
+    except Exception as e:
+        print(f"❌ Kan doel-account niet ophalen: {e}")
+        return
 
     # 4) Repost-log laden (cooldown 14 dagen, alleen voor oude posts)
     repost_log = load_repost_log()
     print(f"🧠 Repost-log geladen (entries na cleanup): {len(repost_log)}")
 
-    # 5) Feed ophalen
-    posts = get_feed_posts(bot_client)
+    # 5) Auteur-feed ophalen
+    posts = get_author_posts(bot_client, target_did, limit=50)
     if not posts:
-        print("ℹ️ Geen posts in feed – stoppen.")
+        print("ℹ️ Geen posts in auteur-feed – stoppen.")
         return
 
-    # 6) DID van samenwerking-account ophalen
-    target_did: Optional[str] = None
-    try:
-        profile = bot_client.app.bsky.actor.get_profile({"actor": STATS_ACCOUNT_HANDLE})
-        target_did = profile.did
-        print("🎯 Samenwerkingsaccount gevonden.")
-    except Exception as e:
-        print(f"⚠️ Kon samenwerkingsaccount niet specifiek ophalen, gebruik volledige feed: {e}")
-
-    # 7) Filter posts op samenwerkingsaccount (als bekend)
-    working_posts = posts
-    if target_did:
-        filtered = [p for p in posts if getattr(p.post.author, "did", None) == target_did]
-        if filtered:
-            working_posts = filtered
-            print(f"🎯 Aantal posts van samenwerkingsaccount in feed: {len(working_posts)}")
-        else:
-            print("ℹ️ Geen posts van samenwerkingsaccount in feed – gebruik volledige feed.")
-
     # sorteer op oud -> nieuw (op basis van createdAt)
-    working_posts.sort(key=get_post_timestamp)
+    posts.sort(key=get_post_timestamp)
 
     me = bot_client.me
 
@@ -497,14 +476,14 @@ def main():
     # SELECTIE VAN POSTS VOOR DEZE RUN
     # -----------------------------------
 
-    # nieuwste post in de (gefilterde) set
-    newest_item = working_posts[-1]
+    # nieuwste post (laatste item na sorteren)
+    newest_item = posts[-1]
     newest_uri = newest_item.post.uri
 
-    # alle oudere posts uit dezelfde set
-    older_items = working_posts[:-1]
+    # oudere posts
+    older_items = posts[:-1]
 
-    # filter: alleen repost-kandidaten die niet van jezelf zijn en niet in cooldown (voor OUDE posts)
+    # filter voor oude posts (geen eigen posts, niet in cooldown)
     old_candidates = []
     for item in older_items:
         uri = item.post.uri
@@ -515,7 +494,7 @@ def main():
             continue
         old_candidates.append(item)
 
-    # nieuwste post is ALTIJD kandidaat zolang het geen eigen post is
+    # nieuwste mag ALTIJD, zolang het niet een eigen post is
     newest_candidate = None
     newest_author = newest_item.post.author
     if newest_author.did != me.did:
@@ -528,10 +507,9 @@ def main():
     chosen_old: List = []
     if old_candidates:
         chosen_old = random.sample(old_candidates, min(2, len(old_candidates)))
-        # sorteer de gekozen oude posts zelf ook van oud -> minder oud
         chosen_old.sort(key=get_post_timestamp)
 
-    # volgorde: twee oude posts eerst, daarna nieuwste (zodat nieuwste bovenaan komt op profiel)
+    # volgorde: eerst 2 oude posts, dan nieuwste
     selected_items: List = []
     selected_items.extend(chosen_old)
     if newest_candidate is not None:
@@ -564,19 +542,18 @@ def main():
         print(f"▶️ [{index}/{len(selected_items)}] Verwerken: {reason}")
         print(f"   Post URI: {uri}")
 
-        # 1) Auteur volgen (zonder naam in log)
+        # 1) Auteur volgen
         ensure_follow(bot_client, author.did)
 
-        # 2) Als dit de nieuwste is: oude repost (indien aanwezig) eerst verwijderen
+        # 2) Nieuwste: oude repost (indien aanwezig) eerst verwijderen
         unrepost_if_needed(bot_client, post, is_newest=is_newest)
 
-        # 3) Repost op hoofdaccount (ZONDER tekst)
+        # 3) Repost
         print("=== [2/6] Repost hoofdaccount ===")
         if not repost_post(bot_client, uri, cid, reason=reason):
-            # als repost faalt, sla de rest van de stappen over voor deze post
             continue
 
-        # 4) Like op hoofdaccount
+        # 4) Like
         print("=== [3/6] Like hoofdaccount ===")
         like_post(bot_client, uri, cid)
 
@@ -587,10 +564,10 @@ def main():
         # 6) Stats-reply
         reply_with_stats(bot_client, uri, cid)
 
-        # 7) Citaatpost op quote-account (@hotbleusky)
+        # 7) Citaatpost
         quote_post(quote_client, uri, cid)
 
-        # 8) Markeer in cooldown-log (maar NIET voor de nieuwste post)
+        # 8) Oude posts in cooldown-log, nieuwste niet
         if not is_newest:
             mark_reposted(uri, repost_log)
 
