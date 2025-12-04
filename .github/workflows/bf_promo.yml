@@ -1,31 +1,32 @@
 name: BF Promo Bot
 
 on:
-  workflow_dispatch:    # Alleen handmatig starten
+  schedule:
+    - cron: "0 */4 * * *"   # Elke 4 uur op het hele uur
+  workflow_dispatch:        # Handmatig starten blijft mogelijk
 
 jobs:
-  run-bf-promo:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
+        # Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
-          pip install atproto
+          pip install atproto aiosqlite
 
-      - name: 🚀 Run BF Promo bot
+      - name: 🔹 Start BF Promo bot
         env:
           BSKY_USERNAME: ${{ secrets.BSKY_USERNAME }}
           BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
-          QUOTE_BSKY_USERNAME: ${{ secrets.QUOTE_BSKY_USERNAME }}
-          QUOTE_BSKY_PASSWORD: ${{ secrets.QUOTE_BSKY_PASSWORD }}
           REPOST2_BSKY_USERNAME: ${{ secrets.REPOST2_BSKY_USERNAME }}
           REPOST2_BSKY_PASSWORD: ${{ secrets.REPOST2_BSKY_PASSWORD }}
         run: |
