@@ -111,11 +111,24 @@ def login_client(username_env: str, password_env: str) -> Client:
 
 def get_post_timestamp(feed_item) -> str:
     """
-    Haalt createdAt van de originele post, voor sortering (oud -> nieuw).
+    Bepaal een timestamp voor sortering (oud -> nieuw).
+
+    Voorkeur:
+    1) record.createdAt  (postdatum)
+    2) post.indexedAt    (wanneer hij in het netwerk kwam)
     """
+
     post = feed_item.post
+
+    # 1) probeer createdAt
     record = getattr(post, "record", None)
-    ts = getattr(record, "createdAt", "")
+    created_at = getattr(record, "createdAt", None)
+
+    # 2) fallback naar indexedAt
+    indexed_at = getattr(post, "indexedAt", None)
+
+    ts = created_at or indexed_at or ""
+
     return ts or ""
 
 
