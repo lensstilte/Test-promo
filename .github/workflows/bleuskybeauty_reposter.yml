@@ -1,4 +1,9 @@
+name: BleuskyBeauty Reposter (10 oude + 10 nieuwe)
 
+on:
+  schedule:
+    # Elke  uur (UTC)
+    - cron: "0 */1 * * *"
   workflow_dispatch: {}
 
 jobs:
