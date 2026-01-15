@@ -1,8 +1,8 @@
-name: BleuskyBeauty Reposter (10 oude + 10 nieuwe)
+name: bleuskybeauty_reposter.yml
 
 on:
   schedule:
-    # Elke  uur (UTC)
+    # Elke uur (UTC)
     - cron: "0 */1 * * *"
   workflow_dispatch: {}
 
