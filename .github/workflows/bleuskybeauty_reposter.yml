@@ -3,7 +3,7 @@ name: bleuskybeauty_reposter.yml
 on:
   schedule:
     # Elke uur (UTC)
-    - cron: "0 */1 * * *"
+    - cron: "21 */1 * * *"
   workflow_dispatch: {}
 
 jobs:
