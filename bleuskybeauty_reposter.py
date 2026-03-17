@@ -51,7 +51,7 @@ class BlueskyClient:
         while len(posts) < max_posts:
             params = {
                 "actor": self.identifier,
-                "limit": 200,
+                "limit": 100,
                 "filter": "posts_with_media",
             }
             if cursor:
