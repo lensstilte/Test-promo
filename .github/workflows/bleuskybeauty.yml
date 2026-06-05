@@ -1,8 +1,7 @@
 name: BleuskyBeauty Bot (2h)
 
 on:
-  schedule:
-    - cron: "21 * * * *"
+  
   workflow_dispatch:
   
 
