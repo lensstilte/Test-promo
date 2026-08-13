@@ -191,38 +191,18 @@ def main():
     # 2) Sorteren op createdAt (oud -> nieuw)
     posts_sorted = sorted(posts, key=lambda p: parse_iso(p["createdAt"]))
 
-    # Als er minder dan 10 posts zijn, gewoon zoveel mogelijk doen
-    newest_10 = posts_sorted[-10:] if len(posts_sorted) >= 10 else posts_sorted[:]
-    older_pool = posts_sorted[:-10] if len(posts_sorted) > 10 else []
+    # Alleen de nieuwste 3 posts
+    newest_3 = posts_sorted[-3:]
 
-    # 10 random oude posts (als er minder zijn, dan zoveel als er zijn)
-    if older_pool:
-        if len(older_pool) > 10:
-            old_random = random.sample(older_pool, 10)
-        else:
-            old_random = older_pool[:]
-        random.shuffle(old_random)  # random volgorde oude posts
-    else:
-        old_random = []
-
-    # Nieuwste 10 van oud -> nieuw (dus zoals posts_sorted al is)
-    newest_10_sorted = sorted(newest_10, key=lambda p: parse_iso(p["createdAt"]))
-
-    # Volgorde:
-    # 1. 10 random oude
-    # 2. nieuwsten 10 van oud -> nieuw (zodat de aller-nieuwste als laatste bovenaan komt)
-    final_sequence = old_random + newest_10_sorted
-
-    # Alleen maximaal 20 reposts per run (10 oud + 10 nieuw)
-    final_sequence = final_sequence[:20]
-
-    for post in final_sequence:
+    # Oud -> nieuw reposten, zodat de nieuwste als laatste wordt gerepost
+    # en daardoor bovenaan eindigt
+    for post in newest_3:
         uri = post["uri"]
         cid = post["cid"]
+
         try:
             client.ensure_fresh_repost(uri, cid)
         except Exception:
-            # Geen logging/boekhouding bijhouden, dus fouten gewoon negeren
             continue
 
 
